@@ -104,7 +104,7 @@ sic = lnPIP25_predict(ip25, sterol, 'dino', 'toc');
 _Plot PDF for a single observation_:
 
 ```matlab
-sic = lnPIP25_predict(ip25(1), sterol(1), 'bras', 'toc', [], true); # note scalar inputs for ip25 and sterol
+sic = lnPIP25_predict(ip25(1), sterol(1), 'bras', 'toc', [], true); % note scalar inputs for ip25 and sterol
 ```
 
 _Plot the full HDI time series_:
