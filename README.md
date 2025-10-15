@@ -164,7 +164,7 @@ site_lat = lat(74,359); site_lon = lon(74,359); % location with near-stationary 
 % visualise it!
 figure; hold on
 plot(1:12, squeeze(SIC(74,359,:))./100, '-o', 'DisplayName','Input site');
-plot(1:12, meta.sic, '-s', 'DisplayName', sprintf('Nearest variable (%.1f km)', meta.distance));
+plot(1:12, meta.sic_ref, '-s', 'DisplayName', sprintf('Nearest variable (%.1f km)', meta.distance));
 scatter(monthsUsed, meta.sic(monthsUsed), 60, 'filled', 'DisplayName','Months used');
 xlabel('Month'); ylabel('SIC (fraction)');
 ```
