@@ -44,7 +44,7 @@ All .m functions (lnPIP25_forward.m, lnPIP25_predict.m, etc.) should reside in t
 Predict ln(PIP<sub>25</sub>) given sea-ice concentration (SIC) using the forward calibration.
 
 **Inputs**
-1. `sic`: scalar or vector of fractional SIC values (0–1)
+1. `sic`: scalar or vector of fractional SIC values (0–1) -- see also `calc_meanSIC.m`
 2. `index`: `'dino'` or `'bras'`
 3. (optional) `bayes` — path name to posterior file (`.txt`); default uses built-in calibrations
 4. (optional) `plotOpt` — boolean flag (if true, plots PDF or HDI series)
@@ -118,6 +118,57 @@ _Use a specific Bayesian posterior file_:
 ```matlab
 sic = lnPIP25_predict(ip25, sterol, 'dino', 'sed', 'server_MAM_bras_2024-08-05_09-18-15.npy');
 ```
+
+## Sea-ice climatology utility — `calc_meanSIC.m`
+
+Compute the mean SIC for the three months ending at the first post-maximum decrease in sea ice concentration. _This mirrors the seasonal logic used by the BaySIC forward model, and can be used to generate the `sic` input for `lnPIP25_forward.m`._
+
+**Inputs**
+1. `sic_climo`:
+*Vector mode*: a 12×1 or 1×12 climatology of SIC values for a site location (fractions in [0,1]). *Grid mode*: a 3-D array of SIC climatological values with one dimension having length 12
+2. (Optional, used for *Grid Mode* only) `site_lat`, `site_lon`, `all_lat`, `all_lon`: scalars (first two) and arrays (last two) of coordinates, each provided in degrees. Longitude convention (0--360˚ or −180--180˚) is handled automatically; inputs for `all_lat` and `all_lon` can be provided either as vectors or matrices, but must match the dimensionality of `sic_climo`.
+
+**Outputs**
+`meanSIC`: scalar mean SIC value over [m−2, m−1, m], where m is the month of first SIC decrease
+`monthsUsed`: a 1 × 3 list of of integer months (1–12; Jan=1, Dec=12)
+`meta`: a diagnostic structure with fields that include computation flags, grid indices, lat/lon, distance to nearest decreasing SIC value, and applied SIC series)
+
+_Usage_:
+
+_Basic 12-month SIC climatology (fractions 0–1)_:
+
+```matlab
+sic = [0.6, 0.7, 0.8, 0.9, 1, 0.9, 0.4, 0.2, 0.1, 0.3, 0.4, 0.5]';
+[meanSIC, monthsUsed, meta] = calc_meanSIC(sic);
+```
+
+_Grid example using 3D (curvilinear gridded) climatology provided in `example_sic_data`_
+
+```matlab
+load example_sic_data/curvilinear_sic_climo.mat  % provides SIC, lat (1D), lon (1D)
+site_lat = lat(166); site_lon = lon(36);
+[meanSIC, monthsUsed, meta] = calc_meanSIC(SIC./100, site_lat, site_lon, lat, lon); % SIC converted from units of percent to fraction
+% visualise it!
+figure; hold on
+plot(1:12, squeeze(SIC(36,166,:))./100, '-o', 'DisplayName','Input site');
+scatter(monthsUsed, squeeze(SIC(36,166,monthsUsed))./100, 60, 'filled', 'DisplayName','Months used'); % could alternatively use meta.sic(monthsUsed) for input y-variable in this example!
+xlabel('Month'); ylabel('SIC (fraction)');
+```
+
+_Grid example using 3D (tripolar gridded) climatology provided in `example_sic_data`, with search required for nearest decreasing SIC location_
+
+```matlab
+load example_sic_data/tripolar_sic_climo.mat  % provides SIC, lat (2D), lon (2D)
+site_lat = lat(74,359); site_lon = lon(74,359); % location with near-stationary SIC values
+[meanSIC, monthsUsed, meta] = calc_meanSIC(SIC./100, site_lat, site_lon, lat, lon);
+% visualise it!
+figure; hold on
+plot(1:12, squeeze(SIC(74,359,:))./100, '-o', 'DisplayName','Input site');
+plot(1:12, meta.sic, '-s', 'DisplayName', sprintf('Nearest variable (%.1f km)', meta.distance));
+scatter(monthsUsed, meta.sic(monthsUsed), 60, 'filled', 'DisplayName','Months used');
+xlabel('Month'); ylabel('SIC (fraction)');
+```
+
 
 ## Get in touch
 
