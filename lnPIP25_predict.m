@@ -83,7 +83,7 @@ lnPIP_grid   = linspace(-12, 0, nL)';
 sic_grid = linspace(0, 1, nSIC+2)';
 sic_grid = sic_grid(2:end-1); % note! make sic_grid length exactly nSIC (interior of [0,1])
 
-% for each lnPIP, interpolate PDF across SIC and sample 1000 draws
+% for each lnPIP, interpolate PDF across SIC and sample 10000 draws
 ndraw = 1000;
 sic = nan(N, ndraw);
 for i = 1:N
@@ -113,7 +113,7 @@ if ~plotOpt, return; end
 
 % default hdi's to plot (these are the same as in Fu et al., 2025)
 hdiMass  = [0.15, 0.35, 0.55, 0.75, 0.95, 0.9999]; hdiMass  = fliplr(hdiMass);
-hdiLabel = ["BaySIC","15% HDI","35% HDI","55% HDI","75% HDI","95% HDI",">95% HDI"]; hdiLabel = fliplr(hdiLabel);
+hdiLabel = ["MAP","15% HDI","35% HDI","55% HDI","75% HDI","95% HDI",">95% HDI"]; hdiLabel = fliplr(hdiLabel);
 
 % load in some nice colours
 cd cbrewer/

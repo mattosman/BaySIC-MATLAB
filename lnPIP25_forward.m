@@ -4,8 +4,9 @@ function lnpip25 = lnPIP25_forward(sic, index, bayes, plotOpt)
 %  adapted from original python code by Chung Yan (Crystal) Fu (cyf25@cam.ac.uk)
 %
 % Inputs:
-% sic -- A vector of sea-ice concentrations in fractional units [0..1]
+% sic -- A scalar or vector of sea-ice concentrations in fractional units e.g., [0.1]
 %        (1 x N) or (N x 1). Values 0 and 1 are internally nudged by 1e-4.
+%        To calculate sic properly, see "calc_meanSIC.m" . 
 %
 % index -- 'dino' or 'bras' (selects which calibration/posterior to use)
 % bayes -- string denoting Bayesian posterior file to use for the calibration.
@@ -18,13 +19,17 @@ function lnpip25 = lnPIP25_forward(sic, index, bayes, plotOpt)
 %        (optional, defaults to false)
 % 
 % Output:
-% lnpip25 : A set of 1000 ln(PIP25) estimates for each SIC. (N x 1000)
+% lnpip25 : A set of 10000 ln(PIP25) estimates for each SIC. (N x 10000)
 %
 % Notes:
 %   ln(PIP25) is modeled as:
 %       mu = (-log(1/SIC - 1) - b0) ./ b1
 %       ln(PIP25) ~ Normal(mu, sd)
-%   where sd = sqrt(phi). We draw 1000 posterior predictive samples per SIC
+%   where sd = sqrt(phi).
+%   Please note this implementation generates a non-deterministic posterior 
+%   predictive ensemble by drawing random noise from the posterior standard deviation, 
+%   whereas the OG Python version computes the predictive distribution analytically as  
+%   deterministic Gaussian mixtures -- we do the latter here only for the visual outputs.
 % 
 % EXAMPLE; 
 % lnpip25 = lnPIP25_forward([0.3], 'dino', [], true);
@@ -35,9 +40,10 @@ function lnpip25 = lnPIP25_forward(sic, index, bayes, plotOpt)
 %   MBO NOTE: this appears to have been changed to cbrewer2, not cbrewer at
 %   some point ... i'm antiquated so i am hard-calling to the 'cbrewer'
 %   subdirectory -- you may need to update line96 if you're replacing with cbrewer2
+%   To properly calculate in the "sic" input, see pair function "calc_meanSIC.m" 
 % 
 % For details, see:
-% Fu, C. Y., Osman, M. B., & Aquino-López, M. A. (2025). Bayesian calibration 
+% Fu, C. Y., Osman, M. B., & Aquino-Lopez, M. A. (2025). Bayesian calibration 
 %     for the Arctic sea ice biomarker IP25. Paleoceanography and Paleoclimatology, 
 %     40, e2024PA005048. https://doi.org/10.1029/2024PA005048
 % -------------------------------------------------------------------------
@@ -60,31 +66,28 @@ sic(sic==1) = 1 - 1e-4;
 [b0, b1, sd] = load_bayes(index, bayes);
 
 % choose number of predictive draws to return
-ndraws = 1000;
+ndraws = 10000;
 % If the posterior has fewer than ndraw draws, resample with replacement
 M = numel(b0);
 if M < ndraws
     idx = randi(M, ndraws, 1);
     b0s = b0(idx);  b1s = b1(idx);  sds = sd(idx);
-else
-    % otherwise take first ndraw draws (or sample if you prefer)
+else % otherwise take first ndraw draws (or sample if you prefer)... this only matters if setting ndraws < 1001
     b0s = b0(1:ndraws);  b1s = b1(1:ndraws);  sds = sd(1:ndraws);
 end
 
 % compute predictive mean for each (SIC, draw) pair
-%     mu = (-log(1/SIC - 1) - b0) ./ b1
-%     lnPIP25 ~ N(mu, sd)
+%     mu = (-log(1/SIC - 1) - b0) ./ b1 .. ---> .... lnPIP25 ~ N(mu, sd)
 N = numel(sic);
-mu = (-log(1./sic - 1)) - b0s.'; % (N x ndraw) minus b0 per draw
-mu = mu ./ b1s.'; % divide by b1 per draw
+mu = [(-log(1 ./ sic - 1)) - b0s'] ./ b1s'; % minus b0 per draw& divide by b1 per draw
 
 % draw posterior predictive noise
-eps = randn(N, ndraws) .* sds.';  % add sd per draw
+eps = randn(N, ndraws) .* sds.'; % add sd per draw
 
 % return posterior predictive samples of ln(PIP25)
 lnpip25 = mu + eps;
 
-% =======  optional plotting capabilities ======= 
+% -------  optional plotting capabilities -------
 
 if ~plotOpt, return; end
 
@@ -106,21 +109,22 @@ cd ../
 
 if N == 1 % plots scalar SIC: histogram + HDIs + MAP ----
    
-    x = lnpip25(:);
-    [pdfVals, xi] = ksdensity(x, lnPIP_grid, 'Bandwidth', 0.15);
-    pdfVals = pdfVals / trapz(xi, pdfVals);
+    % solid PDF fill bands
+    pdfVals = mean( normpdf( lnPIP_grid, ((-log(1./sic - 1)) - b0)./b1, sd ), 1 );
+    pdfVals = pdfVals / trapz(lnPIP_grid, pdfVals);   % normalize area = 1
+
     % compute HDIs
-    [lo, hi, bounds] = computeHDI(pdfVals, xi, hdiMass);
+    [lo, hi, bounds] = computeHDI(pdfVals, lnPIP_grid, hdiMass); % orig: 
     figure('Color','w','Position',[100 100 400 300]); hold on
     for i = 1:numel(bounds)
         % dummy: 
-        f(i) = fill([xi(bounds{i}(1):bounds{i}(2)), fliplr(xi(bounds{i}(1):bounds{i}(2)))], ...
+        f(i) = fill([lnPIP_grid(bounds{i}(1):bounds{i}(2)), fliplr(lnPIP_grid(bounds{i}(1):bounds{i}(2)))], ...
                  [pdfVals(bounds{i}(1):bounds{i}(2)), zeros(1, numel(bounds{i}(1):bounds{i}(2)))], ...
                  colors(i,:), 'FaceAlpha',1, 'EdgeColor','none');
     end
     [~, imax] = max(pdfVals);
-    f(i+1) = plot([xi(imax), xi(imax)], [0, max(pdfVals)], 'color', colors(i+1,:), 'LineWidth',1.0);
-    text(xi(imax)-0.15, max(pdfVals), sprintf('%.2f', xi(imax)), 'HorizontalAlignment','right');
+    f(i+1) = plot([lnPIP_grid(imax), lnPIP_grid(imax)], [0, max(pdfVals)], 'color', colors(i+1,:), 'LineWidth',1.0);
+    text(lnPIP_grid(imax)-0.15, max(pdfVals), sprintf('%.2f', lnPIP_grid(imax)), 'HorizontalAlignment','right');
     xlabel(sprintf('ln(PIP_{25}) (%s)', lower(index)));
     ylabel('Probability');
     xlim([-12 0]); ylim([0 max(pdfVals)*1.1]);
@@ -134,10 +138,10 @@ else % vector SIC.. plots series HDI bands + MAP line
     loVals  = nan(N,numel(hdiMass));
     hiVals  = nan(N,numel(hdiMass));
     for i = 1:N
-        [pdfVals, xi] = ksdensity(lnpip25(i,:), lnPIP_grid, 'Bandwidth', 0.15);
-        pdfVals = pdfVals / trapz(xi,pdfVals);
-        [~, imax] = max(pdfVals); mapVals(i) = xi(imax);
-        [lo, hi] = computeHDI(pdfVals, xi, hdiMass);
+        pdfVals = mean( normpdf( lnPIP_grid, ((-log(1./sic(i) - 1)) - b0)./b1, sd ), 1 );
+        pdfVals = pdfVals / trapz(lnPIP_grid, pdfVals);   % normalize area = 1
+        [~, imax] = max(pdfVals); mapVals(i) = lnPIP_grid(imax);
+        [lo, hi] = computeHDI(pdfVals, lnPIP_grid, hdiMass);
         loVals(i,:) = lo(:);
         hiVals(i,:) = hi(:);
     end
