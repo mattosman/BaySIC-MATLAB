@@ -8,7 +8,8 @@ function [meanSIC, monthsUsed, meta] = calc_meanSIC(sic_climo, varargin)
 %   ending at the first post-maximum decrease in SIC (after rounding to 5%).
 %   Works on a single site (vector) or a grid. In grid mode, it finds the
 %   nearest grid cell to the imput site location, and (if that cell is constant/invalid),
-%   automatically switches to the nearest SIC-variable cell.
+%   automatically switches to the nearest SIC-variable cell to determine the
+%   months to average the input location SIC series over. 
 %
 % inputs
 %   sic_climo : EITHER a 12-element vector (fractional SIC in [0,1]; NaN ok)
@@ -25,17 +26,15 @@ function [meanSIC, monthsUsed, meta] = calc_meanSIC(sic_climo, varargin)
 %   meanSIC     : scalar — mean SIC over months [m−2, m−1, m], where m is the
 %                 month of first post-maximum decrease (1..12; Jan=1).
 %   monthsUsed  : 1 x 3 integer months (1..12), chronological.
-%   meta        : struct with diagnostics (grid mode includes coords/indices)
-%       .flag_no_clear_decrease : true if multi-max scan fell back to first max
-%       .usedNearestVariable    : true if the nearest cell was constant and
-%                                 a variable cell was selected instead
-%       .iy, .ix                : selected grid indices (lat row, lon col)
-%       .lat, .lon              : selected grid coordinates (degrees)
-%       .distance               : km to selected grid cell
-%       .reoriented             : true if any dimension reordering was applied
-%       .movedMonthsTo3rd       : true if month dim moved to 3rd
-%       .swappedLonLat          : true if lat x lon swapped to lon x lat
-%       .sic                    : 12 x 1 SIC series used for the calculation
+%   meta        : struct with diagnostics
+%       .flag_no_clear_decrease : see handle_vector()
+%       .usedNearestVariable : true if a different cell used to find months
+%       .iy, .ix, .lat, .lon : primary (site) grid indices & coords
+%       .iy_ref, .ix_ref, .lat_ref, .lon_ref : reference (month-finding) cell
+%       .distance : km from site to reference cell
+%       .reoriented, .movedMonthsTo3rd, .swappedLonLat : orientation flags
+%       .sic: 12 x 1 site series used for MEAN
+%       .sic_ref: 12 x 1 reference series used to FIND months
 %
 % some notes on function's behaviour / user rules 
 %   * vlues must be proportions in [0,1]; NaNs allowed (ignored in means).
@@ -89,7 +88,7 @@ function [meanSIC, monthsUsed, meta] = calc_meanSIC(sic_climo, varargin)
 
 % Ensure SIC is a proportion
 if ~isnumeric(sic_climo) || any((~isnan(sic_climo(:))) & (sic_climo(:)<0 | sic_climo(:)>1))
-    error('sic_climo must be numeric with all non-NaN values in [0,1].');
+    error('sic_climo must be numeric with all non-NaN values in [0,1]');
 end
 
 meta = struct('reoriented',false,'movedMonthsTo3rd',false,'swappedLonLat',false);
@@ -98,7 +97,7 @@ meta = struct('reoriented',false,'movedMonthsTo3rd',false,'swappedLonLat',false)
 sz  = size(sic_climo);
 nd  = ndims(sic_climo);
 d12 = find(sz==12,1);
-if isempty(d12), error('Input must include a dimension of length 12.'); end
+if isempty(d12), error('input must include a dimension of length 12'); end
 
 % Count non-singleton dims
 ns = nnz(sz~=1);
@@ -141,13 +140,12 @@ elseif nd>=3
 
     % if data are lat x lon x 12, swap to lon x lat x 12
     if size(sic_climo,1)==ny && size(sic_climo,2)==nx
-        sic_climo = permute(sic_climo,[2 1 3]);  % -> lon x lat x 12
+        sic_climo = permute(sic_climo,[2 1 3]);  % lat x lon x 12 -> lon x lat x 12
         meta.reoriented = true;
         meta.swappedLonLat = true;
-    elseif size(sic_climo,1)==nx && size(sic_climo,2)==ny
-        % already lon x lat x 12
-    else
-        error('SIC grid (%d x %d) does not match lon/lat sizes (%d x %d).', size(sic_climo,1),size(sic_climo,2),nx,ny);
+    elseif ~(size(sic_climo,1)==nx && size(sic_climo,2)==ny)
+        error('SIC grid (%d x %d) does not match lon/lat sizes (%d x %d).', ...
+              size(sic_climo,1),size(sic_climo,2),nx,ny);
     end
     nd = ndims(sic_climo);
 else
@@ -177,7 +175,8 @@ elseif nd == 3
     dist_all = haversine_deg(site_lat, site_lon, LAT(:), LON(:));
     [~, p0] = min(dist_all);
     [iy0, ix0] = ind2sub([Ny, Nx], p0);  % iy: lat row, ix: lon col
-    v0 = squeeze(sic_climo(ix0, iy0, :));  % 12x1
+    v0 = squeeze(sic_climo(ix0, iy0, :));  % original site 12x1
+    v_site = v0; % preserve original site vals ... mean will be computed from this
     distClosest = dist_all(p0); % grab the closest distance
 
     usedNearestVariable = false;
@@ -195,37 +194,51 @@ elseif nd == 3
             dist_var = dist_all; dist_var(~isVar) = Inf;
             [~, p1] = min(dist_var);
             [iy, ix] = ind2sub([Ny, Nx], p1);
-            v = squeeze(sic_climo(ix, iy, :));
+            v = squeeze(sic_climo(ix, iy, :)); % reference series
             usedNearestVariable = true;
             distClosest = dist_var(p1); % grab the distance to closest variable sea ice
         else
+            % nothing variable anywhere — build consistent meta and return
             meanSIC = NaN; monthsUsed = [NaN NaN NaN];
-            meta = struct('flag_no_clear_decrease',true, ...
-                          'usedNearestVariable',false, ...
-                          'iy',iy0,'ix',ix0,'lat',LAT(iy0,ix0),'lon',LON(iy0,ix0), ...
-                          'site_lat',site_lat,'site_lon',site_lon, ...
-                          'reoriented',meta.reoriented, ...
-                          'movedMonthsTo3rd',meta.movedMonthsTo3rd, ...
-                          'swappedLonLat',meta.swappedLonLat,...
-                          'distance',distClosest, ...
-                          'sic',v(:));
+            meta = struct( ...
+                        'flag_no_clear_decrease', true, ...
+                        'usedNearestVariable',    false, ...
+                        'iy', iy0, 'ix', ix0, 'lat', LAT(iy0,ix0), 'lon', LON(iy0,ix0), ...
+                        'iy_ref', iy0, 'ix_ref', ix0, 'lat_ref', LAT(iy0,ix0), 'lon_ref', LON(iy0,ix0), ...
+                        'site_lat', site_lat, 'site_lon', site_lon, ...
+                        'reoriented', meta.reoriented, ...
+                        'movedMonthsTo3rd', meta.movedMonthsTo3rd, ...
+                        'swappedLonLat', meta.swappedLonLat, ...
+                        'distance', distClosest, ...
+                        'sic', v0(:), ...     % site series
+                        'sic_ref', v0(:) ...  % same (no variable cell found)
+                    );
             warning('SIC is constant at all grid cells; cannot identify first decrease.');
             return
         end
     end
 
-    [meanSIC, monthsUsed, submeta] = handle_vector(v(:));
+    % 1) find months from reference (v)
+    [~, monthsUsed, submeta] = handle_vector(v(:));
     flag_no_clear_decrease = submeta.flag_no_clear_decrease;
-
-    meta = struct('flag_no_clear_decrease',flag_no_clear_decrease, ...
-                  'usedNearestVariable',usedNearestVariable, ...
-                  'iy',iy,'ix',ix,'lat',LAT(iy,ix),'lon',LON(iy,ix), ...
-                  'site_lat',site_lat,'site_lon',site_lon, ...
-                  'reoriented',meta.reoriented, ...
-                  'movedMonthsTo3rd',meta.movedMonthsTo3rd, ...
-                  'swappedLonLat',meta.swappedLonLat, ...
-                  'distance',distClosest, ...
-                  'sic',v(:));
+    
+    % 2) compute mean from the ORIGINAL site series
+    meanSIC = mean(v_site(monthsUsed), 'omitnan');
+    
+    % meta: keep both series and both locations
+    meta = struct( ...
+                'flag_no_clear_decrease', flag_no_clear_decrease, ...
+                'usedNearestVariable',    usedNearestVariable, ...
+                'iy', iy0, 'ix', ix0, 'lat', LAT(iy0,ix0), 'lon', LON(iy0,ix0), ... % site
+                'iy_ref', iy, 'ix_ref', ix, 'lat_ref', LAT(iy,ix), 'lon_ref', LON(iy,ix), ... % reference
+                'site_lat', site_lat, 'site_lon', site_lon, ...
+                'reoriented', meta.reoriented, ...
+                'movedMonthsTo3rd', meta.movedMonthsTo3rd, ...
+                'swappedLonLat', meta.swappedLonLat, ...
+                'distance', distClosest, ... % distance to reference cell .. 
+                'sic', v_site(:), ... % input site location -- series used for the mean val
+                'sic_ref', v(:) ... % series used to find the correct months .. 
+            );
 
     if flag_no_clear_decrease
         warning(['No clear month of first SIC decrease detected at site; ', ...
