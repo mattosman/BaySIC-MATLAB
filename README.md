@@ -50,7 +50,7 @@ Predict ln(PIP<sub>25</sub>) given sea-ice concentration (SIC) using the forward
 4. (optional) `plotOpt` — boolean flag (if true, plots PDF or HDI series)
 
 **Output**
-`lnpip25` — N × 1000 matrix of posterior draws for ln(PIP<sub>25</sub>)
+`lnpip25` — N × 10,000 matrix of posterior draws for ln(PIP<sub>25</sub>)
 
 _Basic usage_:
 
