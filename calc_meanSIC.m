@@ -19,8 +19,8 @@ function [meanSIC, monthsUsed, meta] = calc_meanSIC(sic_climo, varargin)
 %   varargin  : (grid mode only; order matters)
 %               site_lat   – scalar (degrees)
 %               site_lon   – scalar (degrees; 0–360deg or −180…180deg both ok)
-%               all_lat    – vector Ny x 1 or mesh Ny x Nx (degrees)
-%               all_lon    – vector 1 x Nx or mesh Ny x Nx (degrees; 0–360° ok)
+%               all_lat    – vector Ny x 1 or mesh Nx x Ny (degrees)
+%               all_lon    – vector Nx x 1 or mesh Nx x Ny (degrees; 0–360° ok)
 %
 % outputs
 %   meanSIC     : scalar — mean SIC over months [m−2, m−1, m], where m is the
@@ -33,8 +33,8 @@ function [meanSIC, monthsUsed, meta] = calc_meanSIC(sic_climo, varargin)
 %       .iy_ref, .ix_ref, .lat_ref, .lon_ref : reference (month-finding) cell
 %       .distance : km from site to reference cell
 %       .reoriented, .movedMonthsTo3rd, .swappedLonLat : orientation flags
-%       .sic: 12 x 1 site series used for MEAN
-%       .sic_ref: 12 x 1 reference series used to FIND months
+%       .sic: 12 x 1 site series used for mean
+%       .sic_ref: 12 x 1 reference series used to find months
 %
 % some notes on function's behaviour / user rules 
 %   * vlues must be proportions in [0,1]; NaNs allowed (ignored in means).
@@ -46,7 +46,7 @@ function [meanSIC, monthsUsed, meta] = calc_meanSIC(sic_climo, varargin)
 %     provided as,e .g., lat x lon x 12 or 12 x lat x lon or otherwise, they are 
 %     swapped automatically.
 %   * mixed longitude conventions are supported (0–360deg vs −180…180deg); distances
-%     use a wrapped Δlon in [−/pi,/pi], so nearest-cell selection is robust.
+%     use a wrapped dlon in [−/pi,/pi], so nearest-cell selection is robust.
 %
 % usage (varargin examples)
 %   % 1) Vector mode (single site series)
@@ -66,7 +66,7 @@ function [meanSIC, monthsUsed, meta] = calc_meanSIC(sic_climo, varargin)
 %
 %   % Example B — Full grid with varargin, example must search for nearest SIC grid with monthly variabilty
 %   load example_sic_data/tripolar_sic_climo.mat  % SIC, lat (Ny), lon (Nx) or meshes
-%   site_lat = lat(74);
+%   site_lat = lat(74); % choose a specific site without variability
 %   site_lon = lon(359);  % works whether lon is 0–360 or −180..180
 %   [meanSIC, monthsUsed, meta] = calc_meanSIC(SIC./100, site_lat, site_lon, lat, lon);
 %   % Inspect chosen cell and series:
@@ -270,7 +270,12 @@ function [meanSIC, months, meta] = handle_vector(v)
     Imax = find(vq == vmax);
 
     if numel(Imax) == 12
-        error('SIC is constant throughout the year. Provide a 12 x lat x lon field instead.');
+        % Constant all year after 5% rounding — warn & use annual mean
+        warning('SIC is constant throughout the year. For spatial fallback, use a 3D field; proceeding with annual mean SIC.');
+        meta.flag_no_clear_decrease = true;
+        months = 1:12;                          % use the whole year
+        meanSIC = mean(v(:), 'omitnan');        % annual mean
+        return
     elseif numel(Imax) == 1
         decIdx = Imax(1);
     else
